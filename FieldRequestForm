@@ -1,0 +1,372 @@
+  method if_http_extension~handle_request.
+
+    data: proposed_values     type table of pprop,
+          proposed_values_str type pprop,
+          master_data	        type table of	pprop,
+          master_data_str     type pprop,
+          modified_keys	      type table of	pskey,
+          modified_keys_str   type pskey.
+
+    data: return  type bapireturn,
+          return1 type bapireturn1.
+
+    types: begin of orcscreencommand,
+             command   type string,
+             fieldname type string,
+             data      type string,
+             param1    type string,
+             param2    type string,
+             param3    type string,
+             param4    type string,
+           end of orcscreencommand.
+
+    data: omodel_str  type orcscreencommand.
+    data: omodel      type table of orcscreencommand.
+
+    "Servis için Sabit işlemler
+    data : lo_action type string.
+    data : lv_request_body type string.
+    data : lo_json_deserializer type ref to cl_trex_json_deserializer.
+    data : l_json type string.
+    data : lo_json_serializer type ref to cl_trex_json_serializer.
+
+    data : l_json1 type string,
+           l_json2 type string,
+           l_json3 type string.
+
+    data : l_tab1 type string,
+           l_tab2 type string.
+
+    data : l1 type xstring value '0A00',
+           l3 type xstring value '0900',
+           l5 type xstring value '0D00',
+           l2 type string,
+           l4 type string,
+           l6 type string.
+
+    define read_proposed_values .
+      CLEAR : proposed_values_str , &3 .
+      READ TABLE proposed_values INTO proposed_values_str WITH KEY infty = &1 fname = &2.
+      IF sy-subrc = 0 .&3 = proposed_values_str-fval.ENDIF .
+
+    end-of-definition .
+    define set_proposed_values .
+      CLEAR : proposed_values_str .
+      READ TABLE proposed_values INTO proposed_values_str WITH KEY infty = &1 fname = &2.
+      IF sy-subrc = 0 .proposed_values_str-fval = &3 .MODIFY proposed_values FROM proposed_values_str INDEX sy-tabix .ENDIF .
+
+    end-of-definition .
+    define read_values .
+      CLEAR : omodel_str , &3 .
+      READ TABLE omodel INTO omodel_str WITH KEY command = &1 fieldname = &2.
+      IF sy-subrc = 0 .&3 = omodel_str-data.ENDIF .
+
+    end-of-definition .
+    define set_values .
+      CLEAR : omodel_str .
+      READ TABLE omodel INTO omodel_str WITH KEY command = &1 fieldname = &2.
+      IF sy-subrc = 0 .omodel_str-data = &3 .MODIFY omodel FROM omodel_str INDEX sy-tabix .ENDIF .
+
+    end-of-definition .
+    define insert_values .
+      CLEAR : omodel_str .
+      omodel_str-command = &1 .
+      omodel_str-fieldname = &2 .
+      omodel_str-data = &3 .
+      APPEND omodel_str TO omodel .
+
+    end-of-definition .
+
+    lo_action = server->request->get_header_field( name = '~request_method' ).
+    if lo_action ne 'POST'.
+      call method server->response->set_status( code = '405' reason = 'Hata!' ).
+    endif.
+
+    call function 'HR_KR_XSTRING_TO_STRING'
+      exporting
+        in_xstring = l1
+      importing
+        out_string = l2.
+
+    call function 'HR_KR_XSTRING_TO_STRING'
+      exporting
+        in_xstring = l3
+      importing
+        out_string = l4.
+
+    call function 'HR_KR_XSTRING_TO_STRING'
+      exporting
+        in_xstring = l5
+      importing
+        out_string = l6.
+
+    lv_request_body = server->request->get_cdata( )."Body okunur
+
+    replace all occurrences of l2(1) in lv_request_body with space in character mode.
+    replace all occurrences of l4(1) in lv_request_body with space in character mode.
+    replace all occurrences of l6(1) in lv_request_body with space in character mode.
+
+    replace all occurrences of '"Command"' in lv_request_body with 'Command' in character mode.
+    replace all occurrences of '"Fieldname"' in lv_request_body with 'Fieldname' in character mode.
+    replace all occurrences of '"Data"' in lv_request_body with 'Data' in character mode.
+    replace all occurrences of '"Param1"' in lv_request_body with 'Param1' in character mode.
+    replace all occurrences of '"Param2"' in lv_request_body with 'Param2' in character mode.
+    replace all occurrences of '"Param3"' in lv_request_body with 'Param3' in character mode.
+    replace all occurrences of '"Param4"' in lv_request_body with 'Param4' in character mode.
+
+    create object lo_json_deserializer.
+    lo_json_deserializer->deserialize(
+      exporting
+        json = lv_request_body
+      importing
+        abap = omodel ).
+
+    "COMMAND = Std, ORC standart alanı
+    "COMMAND = FormData, ORC Implementationa özel alan
+
+    "Std için
+    "FIELDNAME    SY-PERNR  STD
+    "FIELDNAME    FORMNAME  STD
+    "FIELDNAME    TASKNAME  STD
+    "FIELDNAME    WIID      STD
+    "FIELDNAME    RETURN    STD
+    "FIELDNAME    MESSAGE   STD
+    "FIELDNAME    RESPPERNR STD
+
+    "FormData için
+    "FIELDNAME    PERNR
+    "FIELDNAME    AWART
+    "FIELDNAME    BEGDA
+    "FIELDNAME    ENDDA
+    "FIELDNAME    BEGUZ
+    "FIELDNAME    ENDUZ
+
+    data : gv_formname  type string,
+           gv_taskname  type string,
+           gv_formevent type string,
+           gv_formfield type string,
+           gv_wiid      type i,
+           gv_werks     type persa,
+           gv_orgeh     type orgeh,
+           gv_begda     type sy-datum,
+           gv_endda     type sy-datum,
+           gv_timeint   type i,
+           gv_error .
+
+
+    read_values 'Std' 'FORMNAME' gv_formname.
+    check sy-subrc = 0 .
+
+    read_values : 'Std' 'TASKNAME'      gv_taskname ,
+                  'Std' 'FORMEVENT'     gv_formevent,
+                  'Std' 'POSTBACKFIELD' gv_formfield,
+                  'Std' 'WIID'          gv_wiid .
+
+    read_values : 'FormData' 'WERKS' gv_werks,
+                  'FormData' 'ORGEH' gv_orgeh,
+                  'FormData' 'BEGDA_F' gv_begda,
+                  'FormData' 'ENDDA_F' gv_endda.
+    " Personel alanı/ Departman seçildikten sonra Personel alt alanı ve Departmanların düzenlenebilir hale getirilmesini sağlar.
+    if gv_wiid is initial .
+      if gv_werks is initial .
+        insert_values 'Set_Enabled' 'BTRTL' 'False' .
+      else .
+        insert_values 'Set_Enabled' 'BTRTL' 'True' .
+      endif .
+
+      if gv_orgeh is initial .
+        insert_values 'Set_Enabled' 'ORGEH2' 'False' .
+      else .
+        insert_values 'Set_Enabled' 'ORGEH2' 'True' .
+      endif .
+
+    endif .
+
+    data : lv_text(100).
+    data : lt_objec type table of objec,
+           ls_objec type objec.
+    data : lt_btrtl type table of t001p .
+    data : ls_btrtl type t001p.
+
+    case gv_formevent .
+      when 'GET' .
+
+
+        "Kısır döngüye girmemesi için yeni form başlangıcında Begda-Endda Alanlarına default value vermek gerekir.
+        if gv_wiid is initial .
+          insert_values 'Set_Value' 'BEGDA_F' sy-datum.
+          insert_values 'Set_Value' 'ENDDA_F' sy-datum.
+        endif .
+
+* WERKS - Personel Alanı listesi doldurma
+        data: lt_werks type table of t500p .
+        data: ls_werks type t500p.
+        " Firmaya bağlı Personel alanları doldurulur.
+        select * from t500p into table lt_werks where bukrs = '1000'.
+
+        loop at lt_werks into ls_werks.
+          concatenate ls_werks-persa ls_werks-name1 into  lv_text separated by '-'.
+          insert_values 'Add_Item' 'WERKS' lv_text.
+        endloop.
+        " Personel Alanına bağlı olan, Personel Alt alanları doldurulur.
+        if not gv_wiid is initial .
+          select * from t001p into table lt_btrtl where werks = gv_werks.
+
+          loop at lt_btrtl into ls_btrtl.
+            concatenate ls_btrtl-btrtl ls_btrtl-btext into  lv_text separated by '-'.
+            insert_values 'Add_Item' 'BTRTL' lv_text.
+          endloop.
+        endif .
+
+* ORGEH - Departman Alan listesi doldurma
+        data : lt_1513 type table of hrp1513,
+               ls_1513 type hrp1513.
+
+        select * from hrp1513 into table lt_1513
+                where plvar = '01'
+                  and otype = 'O'
+                  and subty = '0001'
+                  and istat = '1'
+                  and begda le sy-datum
+                  and endda ge sy-datum
+                  and mgrp = '02' .
+
+        call function 'RH_STRUC_GET'
+          exporting
+            act_otype      = 'O'
+            act_objid      = '50000092'
+            act_wegid      = 'O-O_DOWN'
+          tables
+            result_objec   = lt_objec[]
+          exceptions
+            no_plvar_found = 1
+            no_entry_found = 2
+            others         = 3.
+
+        loop at lt_1513 into ls_1513 .
+          read table lt_objec into ls_objec with key objid = ls_1513-objid .
+          check sy-subrc = 0 .
+          concatenate ls_objec-objid ls_objec-stext into  lv_text separated by '-'.
+          insert_values 'Add_Item' 'ORGEH' lv_text.
+        endloop .
+        " Departmanlara bağlı Organizasyon birimleri doldurulur.
+        if not gv_wiid is initial .
+          refresh lt_objec .
+          call function 'RH_STRUC_GET'
+            exporting
+              act_otype      = 'O'
+              act_objid      = gv_orgeh
+              act_wegid      = 'O-O_DOWN'
+            tables
+              result_objec   = lt_objec[]
+            exceptions
+              no_plvar_found = 1
+              no_entry_found = 2
+              others         = 3.
+          loop at lt_objec into ls_objec .
+            concatenate ls_objec-objid ls_objec-stext into  lv_text separated by '-'.
+            insert_values 'Add_Item' 'ORGEH2' lv_text.
+          endloop .
+        endif .
+
+      when 'POSTBACK'.
+
+        case gv_formfield.
+
+          when 'WERKS'."WERKS'e bağlı BTRTL'ler Filtrelenir. (Personel Alanına bağlı Personel alt alanları)
+
+            insert_values 'Clear_Items' 'BTRTL' '' .
+
+            select * from t001p into table lt_btrtl where werks = gv_werks.
+
+            loop at lt_btrtl into ls_btrtl.
+              concatenate ls_btrtl-btrtl ls_btrtl-btext into  lv_text separated by '-'.
+              insert_values 'Add_Item' 'BTRTL' lv_text.
+            endloop.
+
+          when 'ORGEH' ."ORGEH'e bağlı ORGEH2'ler filtrelenir. (Departmana bağlı Org Birimleri)
+
+            insert_values 'Clear_Items' 'ORGEH2' '' .
+
+            refresh lt_objec .
+            call function 'RH_STRUC_GET'
+              exporting
+                act_otype      = 'O'
+                act_objid      = gv_orgeh
+                act_wegid      = 'O-O_DOWN'
+              tables
+                result_objec   = lt_objec[]
+              exceptions
+                no_plvar_found = 1
+                no_entry_found = 2
+                others         = 3.
+            loop at lt_objec into ls_objec .
+              concatenate ls_objec-objid ls_objec-stext into  lv_text separated by '-'.
+              insert_values 'Add_Item' 'ORGEH2' lv_text.
+            endloop .
+
+
+            "Begda ve Endda arasında fark hesaplanır. Eğer başlangıç tarihi bitiş tarihinden ileri tarihli ise hata mesajı olarak kullanıcı bilgilendirilir.
+          when 'BEGDA_F' or 'ENDDA_F' .
+            gv_timeint = gv_endda - gv_begda .
+            insert_values 'Set_Value' 'DURATION_F' gv_timeint.
+
+            if gv_begda < sy-datum .
+              gv_error = 'X' .
+              set_values : 'Std' 'RETURN' 'E' ,
+                           'Std' 'MESSAGE' 'Cari günden geriye talep yapılamaz' .
+            endif .
+            if gv_endda < gv_begda .
+              gv_error = 'X' .
+              set_values : 'Std' 'RETURN' 'E' ,
+                           'Std' 'MESSAGE' 'Talep bitiş tarihi başlangıçtan önce olamaz' .
+            endif .
+
+        endcase .
+
+    endcase .
+
+    "Submit durumunda kontroller tekrar yapılır, eğer başlangıç tarihi bitiş tarihinden ileri tarihli ise formu göndermeye izin verilmez.
+    case gv_taskname .
+      when 'DOSUBMIT' .
+        if gv_begda < sy-datum .
+          gv_error = 'X' .
+          set_values : 'Std' 'RETURN' 'E' ,
+                       'Std' 'MESSAGE' 'Cari günden geriye talep yapılamaz' .
+        endif .
+        if gv_endda < gv_begda .
+          gv_error = 'X' .
+          set_values : 'Std' 'RETURN' 'E' ,
+                       'Std' 'MESSAGE' 'Talep bitiş tarihi başlangıçtan önce olamaz' .
+        endif .
+      when 'DOAPPROVE' .
+
+    endcase .
+
+    create object lo_json_serializer
+      exporting
+        data = omodel.
+
+    call method lo_json_serializer->serialize.
+
+    call method lo_json_serializer->get_data
+      receiving
+        rval = l_json.
+
+    replace all occurrences of 'command'   in l_json with '"Command"'  in character mode.
+    replace all occurrences of 'fieldname' in l_json with '"Fieldname"'  in character mode.
+    replace all occurrences of 'data'      in l_json with '"Data"'   in character mode.
+    replace all occurrences of 'param1'      in l_json with '"Param1"'   in character mode.
+    replace all occurrences of 'param2'      in l_json with '"Param2"'   in character mode.
+    replace all occurrences of 'param3'      in l_json with '"Param3"'   in character mode.
+    replace all occurrences of 'param4'      in l_json with '"Param4"'   in character mode.
+
+*Sets the content type of the response
+    call method server->response->set_header_field(
+        name  = 'Content-Type'
+        value = 'application/json; charset=iso-8859-1' ).
+
+*Return the results to JSON format
+    call method server->response->set_cdata( data = l_json ).
+
+  endmethod.
